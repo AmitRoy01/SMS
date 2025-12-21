@@ -12,12 +12,19 @@ from models import User, UserCreate, UserLogin, UserUpdate, Token, UserRole, Use
 from auth import authenticate_user, create_access_token, get_current_user, get_current_active_user, get_current_admin_user, get_password_hash
 from database import init_database, get_users_collection, get_failed_sms_collection
 from sms_sender import bulk_send, normalize_phone
-from templates import format_varsity_results, format_medical_results
+from templates import format_varsity_results, format_medical_results, format_ssc_hsc_results
 import pandas as pd
 from io import BytesIO
 from fastapi.responses import StreamingResponse
+import asyncio
+import json
+from typing import Dict
+import uuid
 
 load_dotenv()
+
+# Global progress storage for SMS sending
+progress_store: Dict[str, dict] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -293,11 +300,22 @@ async def upload_file(file: UploadFile = File(...), current_user: User = Depends
         print(f'Extracted {len(data)} rows')
     return {'data': data}
 
+@app.get('/sms-progress/{job_id}')
+async def sms_progress(job_id: str, current_user: User = Depends(get_current_active_user)):
+    """Get current progress for SMS sending job"""
+    if job_id not in progress_store:
+        raise HTTPException(status_code=404, detail='Job not found')
+    
+    return progress_store[job_id]
+
 @app.post('/send-sms')
 async def send_sms(request: dict, current_user: User = Depends(get_current_active_user)):
     data = request.get('data', [])
     selected_indices = request.get('selectedIndices', None)  # Optional: indices of selected rows
-
+    
+    # Generate unique job ID for progress tracking
+    job_id = request.get('job_id', str(uuid.uuid4()))
+    
     sent_count = 0
     failed_count = 0
     failed_recipients = []  # Track failed recipients
@@ -323,9 +341,21 @@ async def send_sms(request: dict, current_user: User = Depends(get_current_activ
         filtered_data = data
 
     print(f'Processing {len(filtered_data)} items for SMS')
+    
+    # Initialize progress tracking
+    total_items = len(filtered_data)
+    progress_store[job_id] = {
+        'job_id': job_id,
+        'progress': 0,
+        'total': total_items,
+        'sent': 0,
+        'failed': 0,
+        'completed': False,
+        'message': 'Starting SMS sending...'
+    }
 
     # Send individual SMS to each phone number
-    for item in filtered_data:
+    for idx, item in enumerate(filtered_data):
         sms_text = item.get('Result')
         if not sms_text:
             failed_count += 1
@@ -480,9 +510,42 @@ async def send_sms(request: dict, current_user: User = Depends(get_current_activ
         # If item was successful, add to successful recipients
         else:
             successful_recipients.append(item)
+        
+        # Update progress after each item
+        progress_percentage = int(((idx + 1) / total_items) * 100)
+        progress_store[job_id] = {
+            'job_id': job_id,
+            'progress': progress_percentage,
+            'total': total_items,
+            'sent': sent_count,
+            'failed': failed_count,
+            'completed': False,
+            'message': f'Sending SMS... {idx + 1}/{total_items}'
+        }
+
+    # Mark as completed
+    progress_store[job_id] = {
+        'job_id': job_id,
+        'progress': 100,
+        'total': total_items,
+        'sent': sent_count,
+        'failed': failed_count,
+        'completed': True,
+        'message': f'Completed! Sent: {sent_count}, Failed: {failed_count}',
+        'timestamp': datetime.utcnow().timestamp()
+    }
+    
+    # Schedule cleanup of progress data after 30 seconds
+    async def cleanup_progress():
+        await asyncio.sleep(30)
+        if job_id in progress_store:
+            del progress_store[job_id]
+    
+    asyncio.create_task(cleanup_progress())
 
     # Return response with recipients data
     response_data = {
+        'job_id': job_id,
         'message': f'SMS sent to {sent_count} numbers. Failed: {failed_count}',
         'sent_count': sent_count,
         'failed_count': failed_count
@@ -601,6 +664,8 @@ async def templates_preview(request: dict, current_user: User = Depends(get_curr
         out = format_varsity_results(df)
     elif ttype == 'medical':
         out = format_medical_results(df)
+    elif ttype == 'ssc_hsc':
+        out = format_ssc_hsc_results(df)
     else:
         raise HTTPException(status_code=400, detail='unknown template type')
     # Return full rows including generated Result so frontend can preview and send
@@ -621,6 +686,8 @@ async def templates_download(request: dict, current_user: User = Depends(get_cur
         out = format_varsity_results(df)
     elif ttype == 'medical':
         out = format_medical_results(df)
+    elif ttype == 'ssc_hsc':
+        out = format_ssc_hsc_results(df)
     else:
         raise HTTPException(status_code=400, detail='unknown template type')
 
@@ -643,6 +710,8 @@ async def templates_send(request: dict, current_user: User = Depends(get_current
         out = format_varsity_results(df)
     elif ttype == 'medical':
         out = format_medical_results(df)
+    elif ttype == 'ssc_hsc':
+        out = format_ssc_hsc_results(df)
     else:
         raise HTTPException(status_code=400, detail='unknown template type')
 
@@ -909,7 +978,7 @@ async def download_failed(request: dict, current_user: User = Depends(get_curren
 @app.get("/check-balance")
 async def check_balance(current_user: User = Depends(get_current_admin_user)):
     """
-    Check SMS balance from BulkSMS BD API
+    Check SMS balance from BulkSMS BD API (Admin only)
     """
     api_key = os.getenv('SMS_API_KEY')
     api_url = os.getenv('SMS_API_URL', 'http://bulksmsbd.net/api/smsapi')

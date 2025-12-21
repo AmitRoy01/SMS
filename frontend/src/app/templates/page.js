@@ -7,7 +7,7 @@ import styles from "./template_style.module.css";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://sms-8kiu.onrender.com" || "http://localhost:8000";
 
 export default function TemplatesPage() {
-  const [type, setType] = useState("varsity");
+  const [type, setType] = useState("ssc_hsc");
   const [excelFile, setExcelFile] = useState(null);
   const [parsedRows, setParsedRows] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -193,6 +193,7 @@ export default function TemplatesPage() {
           >
             <option value="varsity">Varsity / Engineering Result</option>
             <option value="medical">Medical Result</option>
+            <option value="ssc_hsc">SSC / HSC Result</option>
           </select>
         </div>
 

@@ -23,6 +23,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [smsResult, setSmsResult] = useState(null);
+  const [smsProgress, setSmsProgress] = useState(null); // Progress state
+  const [showProgress, setShowProgress] = useState(false); // Show/hide progress bar
   const router = useRouter();
   const pathname = usePathname();
 
@@ -155,8 +157,39 @@ export default function Home() {
     }
 
     setLoading(true);
+    setShowProgress(true);
+    setSmsProgress({ progress: 0, total: selectedIndices.length, sent: 0, failed: 0, message: 'Starting...' });
+    setSmsResult(null);
+    setSmsMessage('');
+    
     const token = localStorage.getItem('token');
+    const jobId = `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Start progress polling
+    const pollInterval = setInterval(async () => {
+      try {
+        const progressResponse = await fetch(`${API_BASE_URL}/sms-progress/${jobId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (progressResponse.ok) {
+          const progressData = await progressResponse.json();
+          setSmsProgress(progressData);
+          
+          if (progressData.completed) {
+            clearInterval(pollInterval);
+            setTimeout(() => {
+              setShowProgress(false);
+            }, 3000);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching progress:', err);
+      }
+    }, 500);
+    
     try {
+      // Send SMS request with job ID
       const response = await fetch(`${API_BASE_URL}/send-sms`, {
         method: 'POST',
         headers: {
@@ -164,18 +197,23 @@ export default function Home() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
+          job_id: jobId,
           data: data,
           selectedIndices: selectedIndices
         }),
       });
+      
       const result = await response.json();
       setSmsMessage(result.message); // Set SMS result message
       setSmsResult(result); // Store the full result including failed_recipients
       setMessage(''); // Clear any previous error messages
+      
     } catch (error) {
+      clearInterval(pollInterval);
       setMessage('Error sending SMS');
       setSmsResult(null);
       setSmsMessage(''); // Clear SMS message on error
+      setShowProgress(false);
     }
     setLoading(false);
   };
@@ -383,39 +421,37 @@ export default function Home() {
                 <>
                   <span className="me-3">Welcome, {currentUser?.full_name}</span>
                   {currentUser?.role === 'admin' && (
-      <>
-        <Link
-          href="/admin"
-          className="btn btn-outline-primary btn-sm me-2 d-flex align-items-center gap-1"
-        >
-          <FaTools /> Admin Panel
-        </Link>
-
-                  {/* Check Balance Button - Admin Only */}
-                  <button
-                    className="btn btn-outline-success btn-sm me-2 d-flex align-items-center gap-1"
-                    onClick={async () => {
-                      try {
-                        const token = localStorage.getItem('token');
-                        const res = await fetch(`${API_BASE_URL}/check-balance`, {
-                          headers: { Authorization: `Bearer ${token}` }
-                        });
-                        const data = await res.json();
-                        if (res.ok && data.status === 'success') {
-                          alert(`Your current balance is: ${data.balance}`);
-                        } else {
-                          alert(`Failed to fetch balance: ${data.message || 'Unknown error'}`);
+                    <button
+                      className="btn btn-outline-success btn-sm me-2 d-flex align-items-center gap-1"
+                      onClick={async () => {
+                        try {
+                          const token = localStorage.getItem('token');
+                          const res = await fetch(`${API_BASE_URL}/check-balance`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          const data = await res.json();
+                          if (res.ok && data.status === 'success') {
+                            alert(`Your current balance is: ${data.balance}`);
+                          } else {
+                            alert(`Failed to fetch balance: ${data.message || 'Unknown error'}`);
+                          }
+                        } catch (err) {
+                          console.error(err);
+                          alert('Error fetching balance');
                         }
-                      } catch (err) {
-                        console.error(err);
-                        alert('Error fetching balance');
-                      }
-                    }}
-                  >
-                    💰 Check Balance
-                  </button>
-                </>
-              )}
+                      }}
+                    >
+                      💰 Check Balance
+                    </button>
+                  )}
+                  {currentUser?.role === 'admin' && (
+                    <Link
+                      href="/admin"
+                      className="btn btn-outline-primary btn-sm me-2 d-flex align-items-center gap-1"
+                    >
+                      <FaTools /> Admin Panel
+                    </Link>
+                  )}
                   <button className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onClick={logout}>
                     <FiLogOut /> Logout
                   </button>
@@ -667,6 +703,36 @@ export default function Home() {
                         Export will create a ZIP file with two separate Excel files: Success.xlsx and Failed.xlsx
                       </small>
                     </div>
+
+                    {/* Progress Bar */}
+                    {showProgress && smsProgress && (
+                      <div className="mt-4">
+                        <div className="card shadow-sm">
+                          <div className="card-body">
+                            <h6 className="card-title mb-3">
+                              <span className="badge bg-primary">Sending SMS</span>
+                              <span className="ms-2">{smsProgress.message}</span>
+                            </h6>
+                            <div className="progress mb-2" style={{ height: '25px' }}>
+                              <div
+                                className="progress-bar progress-bar-striped progress-bar-animated"
+                                role="progressbar"
+                                style={{ width: `${smsProgress.progress}%` }}
+                                aria-valuenow={smsProgress.progress}
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                              >
+                                <strong>{smsProgress.progress}%</strong>
+                              </div>
+                            </div>
+                            <div className="d-flex justify-content-between text-muted small">
+                              <span>Progress: {smsProgress.progress}%</span>
+                              <span>Sent: {smsProgress.sent} | Failed: {smsProgress.failed}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {smsMessage && (
                       <div className="alert alert-success mt-3" role="alert">
