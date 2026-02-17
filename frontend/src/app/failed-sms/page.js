@@ -17,8 +17,15 @@ export default function FailedSMSPage(){
       if(!token) return router.push('/login');
       try{
         const res = await fetch(`${API_BASE_URL}/users/me`, { headers: { Authorization: `Bearer ${token}` } });
-        if(!res.ok){ localStorage.removeItem('token'); return router.push('/login'); }
-      }catch(e){ localStorage.removeItem('token'); return router.push('/login'); }
+        // Only redirect/remove token on 401 (unauthorized)
+        if(res.status === 401){ 
+          localStorage.removeItem('token'); 
+          return router.push('/login'); 
+        }
+      }catch(e){ 
+        // Don't remove token on network errors
+        console.error('Error checking auth:', e.message);
+      }
     }
     checkAuth();
   },[router]);

@@ -51,8 +51,13 @@ export default function Admin() {
       fetchPendingUsers();
       fetchAllUsers();
     } catch (err) {
-      localStorage.removeItem('token');
-      router.push('/login');
+      // Only remove token if it's actually invalid (401)
+      if (err.response && err.response.status === 401) {
+        localStorage.removeItem('token');
+        router.push('/login');
+      } else {
+        console.error('Error checking auth:', err.message);
+      }
     }
     setLoading(false);
   }, [router]);

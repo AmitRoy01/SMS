@@ -12,6 +12,7 @@ export default function TemplatesPage() {
   const [parsedRows, setParsedRows] = useState([]);
   const [preview, setPreview] = useState(null);
   const [selectedIndices, setSelectedIndices] = useState([]);
+  const [rowRange, setRowRange] = useState(''); // Row range input
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -23,13 +24,14 @@ export default function TemplatesPage() {
         const res = await fetch(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) {
+        // Only redirect/remove token on 401 (unauthorized)
+        if (res.status === 401) {
           localStorage.removeItem("token");
           return router.push("/login");
         }
       } catch (e) {
-        localStorage.removeItem("token");
-        return router.push("/login");
+        // Don't remove token on network errors
+        console.error('Error checking auth:', e.message);
       }
     };
     checkAuth();
@@ -95,6 +97,63 @@ export default function TemplatesPage() {
 
   const deselectAll = () => {
     setSelectedIndices([]);
+  };
+
+  const handleApplyRange = () => {
+    const trimmed = rowRange.trim();
+    if (!trimmed) {
+      alert('Please enter a row range');
+      return;
+    }
+
+    if (!preview || preview.length === 0) {
+      alert('No preview data available');
+      return;
+    }
+
+    try {
+      let indices = [];
+      
+      // Parse "20-50" or "20-" or "20"
+      if (trimmed.includes('-')) {
+        const parts = trimmed.split('-');
+        const start = parseInt(parts[0]);
+        
+        if (isNaN(start) || start < 1) {
+          alert('Invalid start row number');
+          return;
+        }
+        
+        if (parts[1] === '') {
+          // "20-" means from row 20 to end
+          for (let i = start - 1; i < preview.length; i++) {
+            indices.push(i);
+          }
+        } else {
+          // "20-50" means from row 20 to 50
+          const end = parseInt(parts[1]);
+          if (isNaN(end) || end < start) {
+            alert('Invalid end row number');
+            return;
+          }
+          for (let i = start - 1; i < Math.min(end, preview.length); i++) {
+            indices.push(i);
+          }
+        }
+      } else {
+        // "20" means only row 20
+        const single = parseInt(trimmed);
+        if (isNaN(single) || single < 1 || single > preview.length) {
+          alert('Invalid row number');
+          return;
+        }
+        indices = [single - 1];
+      }
+      
+      setSelectedIndices(indices);
+    } catch (error) {
+      alert('Invalid range format. Use formats like: 20, 20-50, or 20-');
+    }
   };
 
   const discardPreview = () => {
@@ -244,6 +303,23 @@ export default function TemplatesPage() {
 
             <div className="d-flex justify-content-between align-items-center mb-2">
               <div className={styles.controlsRow}>
+                <div className="d-flex gap-2 align-items-center me-3">
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    style={{ width: '120px' }}
+                    placeholder="e.g. 20-50"
+                    value={rowRange}
+                    onChange={(e) => setRowRange(e.target.value)}
+                    title="Enter range: 20 (single), 20-50 (range), 20- (from 20 to end)"
+                  />
+                  <button
+                    className={`${styles.btnCustom} ${styles.btnOutline} btn-sm`}
+                    onClick={handleApplyRange}
+                  >
+                    Apply Range
+                  </button>
+                </div>
                 <button
                   className={`${styles.btnCustom} ${styles.btnOutline} btn-sm`}
                   onClick={selectAll}

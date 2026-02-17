@@ -18,6 +18,7 @@ export default function Home() {
   const [activeOption, setActiveOption] = useState(null);
   const [data, setData] = useState([]);
   const [selectedIndices, setSelectedIndices] = useState([]);
+  const [rowRange, setRowRange] = useState(''); // Row range input
   const [smsMessage, setSmsMessage] = useState(''); // Separate state for SMS results
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -74,8 +75,14 @@ export default function Home() {
       });
       setCurrentUser(response.data);
     } catch (err) {
-      localStorage.removeItem('token');
-      setCurrentUser(null);
+      // Only remove token if it's actually invalid (401), not for network errors
+      if (err.response && err.response.status === 401) {
+        localStorage.removeItem('token');
+        setCurrentUser(null);
+      } else {
+        // Keep the token for network errors or server issues
+        console.error('Error checking auth:', err.message);
+      }
     }
   };
 
@@ -147,6 +154,59 @@ export default function Home() {
       setSelectedIndices([]);
     } else {
       setSelectedIndices(data.map((_, index) => index));
+    }
+  };
+
+  const handleApplyRange = () => {
+    const trimmed = rowRange.trim();
+    if (!trimmed) {
+      setMessage('Please enter a row range');
+      return;
+    }
+
+    try {
+      let indices = [];
+      
+      // Parse "20-50" or "20-" or "20"
+      if (trimmed.includes('-')) {
+        const parts = trimmed.split('-');
+        const start = parseInt(parts[0]);
+        
+        if (isNaN(start) || start < 1) {
+          setMessage('Invalid start row number');
+          return;
+        }
+        
+        if (parts[1] === '') {
+          // "20-" means from row 20 to end
+          for (let i = start - 1; i < data.length; i++) {
+            indices.push(i);
+          }
+        } else {
+          // "20-50" means from row 20 to 50
+          const end = parseInt(parts[1]);
+          if (isNaN(end) || end < start) {
+            setMessage('Invalid end row number');
+            return;
+          }
+          for (let i = start - 1; i < Math.min(end, data.length); i++) {
+            indices.push(i);
+          }
+        }
+      } else {
+        // "20" means only row 20
+        const single = parseInt(trimmed);
+        if (isNaN(single) || single < 1 || single > data.length) {
+          setMessage('Invalid row number');
+          return;
+        }
+        indices = [single - 1];
+      }
+      
+      setSelectedIndices(indices);
+      setMessage('');
+    } catch (error) {
+      setMessage('Invalid range format. Use formats like: 20, 20-50, or 20-');
     }
   };
 
@@ -569,17 +629,36 @@ export default function Home() {
                 <div className="card shadow p-4 mt-4">
                   <div className="d-flex justify-content-between align-items-center mb-3">
                     <h4 className="card-title mb-0">Extracted Data ({data.length} rows)</h4>
-                    <div className="form-check">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id="selectAll"
-                        checked={selectedIndices.length === data.length && data.length > 0}
-                        onChange={handleSelectAll}
-                      />
-                      <label className="form-check-label" htmlFor="selectAll">
-                        Select All ({selectedIndices.length} selected)
-                      </label>
+                    <div className="d-flex gap-3 align-items-center">
+                      <div className="d-flex gap-2 align-items-center">
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          style={{ width: '120px' }}
+                          placeholder="e.g. 20-50"
+                          value={rowRange}
+                          onChange={(e) => setRowRange(e.target.value)}
+                          title="Enter range: 20 (single), 20-50 (range), 20- (from 20 to end)"
+                        />
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={handleApplyRange}
+                        >
+                          Apply Range
+                        </button>
+                      </div>
+                      <div className="form-check">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id="selectAll"
+                          checked={selectedIndices.length === data.length && data.length > 0}
+                          onChange={handleSelectAll}
+                        />
+                        <label className="form-check-label" htmlFor="selectAll">
+                          Select All ({selectedIndices.length} selected)
+                        </label>
+                      </div>
                     </div>
                   </div>
                   {/* <div className="table-responsive">
